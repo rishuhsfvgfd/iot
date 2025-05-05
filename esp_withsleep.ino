@@ -163,11 +163,11 @@ void loop() {
     lastDetectionTime = millis();
   }
 
-  Serial.println("fuck off i am going to sleep");
+  Serial.println("I am going to sleep");
 
   esp_light_sleep_start();
 
-  Serial.println("i am back losers");
+  Serial.println("Woke up from sleep");
 
   delay(1000); // Prevent flooding
 }
