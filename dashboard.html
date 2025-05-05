@@ -1,0 +1,1914 @@
+<script type="text/javascript">
+    var gk_isXlsx = false;
+    var gk_xlsxFileLookup = {};
+    var gk_fileData = {};
+    function filledCell(cell) {
+      return cell !== '' && cell != null;
+    }
+    function loadFileData(filename) {
+    if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+        try {
+            var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+            var firstSheetName = workbook.SheetNames[0];
+            var worksheet = workbook.Sheets[firstSheetName];
+
+            // Convert sheet to JSON to filter blank rows
+            var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+            // Filter out blank rows (rows where all cells are empty, null, or undefined)
+            var filteredData = jsonData.filter(row => row.some(filledCell));
+
+            // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+            var headerRowIndex = filteredData.findIndex((row, index) =>
+              row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+            );
+            // Fallback
+            if (headerRowIndex === -1 || headerRowIndex > 25) {
+              headerRowIndex = 0;
+            }
+
+            // Convert filtered JSON back to CSV
+            var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+            csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+            return csv;
+        } catch (e) {
+            console.error(e);
+            return "";
+        }
+    }
+    return gk_fileData[filename] || "";
+    }
+    </script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wildlife and RFID Tracking Dashboard</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+    :root {
+        /* Light theme */
+        --bg-color: #f8f9fa;
+        --text-color: #212529;
+        --card-bg: #ffffff;
+        --header-bg: #343a40;
+        --header-text: #ffffff;
+        --alert-bg: rgba(220, 53, 69, 0.8);
+        --chart-bg: #ffffff;
+        --control-bg: #e9ecef;
+        --shadow: rgba(0, 0, 0, 0.1);
+        --primary: #4361ee;
+        --success: #2ec4b6;
+        --danger: #e71d36;
+        --badge-present-bg: rgba(46, 196, 182, 0.2);
+        --badge-present-border: #2ec4b6;
+        --badge-missing-bg: rgba(231, 29, 54, 0.2);
+        --badge-missing-border: #e71d36;
+        --table-header-bg: #4361ee;
+        --table-header-text: #ffffff;
+    }
+
+    [data-theme="dark"] {
+        /* Dark theme */
+        --bg-color: #1a1a1a;
+        --text-color: #e0e0e0;
+        --card-bg: #2c2c2c;
+        --header-bg: #1f2a44;
+        --header-text: #e0e0e0;
+        --alert-bg: rgba(255, 99, 71, 0.8);
+        --chart-bg: #2c2c2c;
+        --control-bg: #3a3a3a;
+        --shadow: rgba(0, 0, 0, 0.3);
+        --badge-present-bg: rgba(46, 196, 182, 0.3);
+        --badge-present-border: #2ec4b6;
+        --badge-missing-bg: rgba(231, 29, 54, 0.3);
+        --badge-missing-border: #ff5555;
+        --table-header-bg: #1f2a44;
+        --table-header-text: #e0e0e0;
+    }
+
+    body {
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        transition: background-color 0.3s, color 0.3s;
+    }
+
+    .header {
+        background-color: var(--header-bg);
+        color: var(--header-text);
+        padding: 15px 0;
+        margin-bottom: 20px;
+    }
+
+    .video-container {
+        background-color: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        position: relative;
+        max-height: 360px; /* Add this line to reduce height */
+        margin-bottom: 1rem;
+    }
+
+    .video-feed {
+        width: 100%;
+        height: auto;
+        max-height: 360px; /* Add this line to match container */
+        object-fit: contain; /* Add this to maintain aspect ratio */
+        display: block;
+    }
+
+    .alert-history {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+
+    .detection-card, .rfid-card {
+        background-color: var(--card-bg);
+        transition: transform 0.2s, background-color 0.3s;
+    }
+
+    .detection-card:hover, .rfid-card:hover {
+        transform: scale(1.02);
+    }
+
+    .controls {
+        padding: 15px;
+        background-color: var(--control-bg);
+        border-radius: 8px;
+        margin-bottom: 20px;
+        transition: background-color 0.3s;
+    }
+
+    .status-indicator {
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+
+    .status-active {
+        background-color: #28a745;
+    }
+
+    .status-inactive {
+        background-color: #dc3545;
+    }
+
+    .alert-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: var(--alert-bg);
+        color: #fff;
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-weight: bold;
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+
+    .detection-timestamp {
+        font-size: 0.85rem;
+        color: #6c757d;
+    }
+
+    #notificationSound {
+        display: none;
+    }
+
+    .chart-container {
+        margin-top: 20px;
+        background-color: var(--chart-bg);
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 2px 4px var(--shadow);
+        transition: background-color 0.3s;
+    }
+
+    .nav-tabs {
+        margin-bottom: 15px;
+    }
+
+    .detection-type-human {
+        border-left: 4px solid #dc3545;
+    }
+
+    .detection-type-animal {
+        border-left: 4px solid #17a2b8;
+    }
+
+    .detection-type-chainsaw {
+        border-left: 4px solid #fd7e14;
+    }
+
+    .detection-type-gun {
+        border-left: 4px solid #6f42c1;
+    }
+
+    .btn-filter {
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+
+    .date-filter {
+        max-width: 300px;
+    }
+
+    .audio-visualizer {
+        height: 60px;
+        background-color: #000;
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .audio-bar {
+        position: absolute;
+        bottom: 0;
+        background-color: #28a745;
+        width: 5px;
+        border-radius: 2px 2px 0 0;
+        transition: height 0.1s ease;
+    }
+
+    .sound-card {
+        border-left: 4px solid #28a745;
+    }
+
+    .sound-alert-card {
+        border-left: 4px solid #dc3545;
+        background-color: var(--card-bg);
+    }
+
+    .theme-toggle {
+        cursor: pointer;
+        font-size: 1.2rem;
+        color: var(--header-text);
+    }
+
+    .theme-toggle:hover {
+        opacity: 0.8;
+    }
+
+    /* RFID-specific styles */
+    .rfid-table {
+        width: 100%;
+        border-collapse: collapse;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .rfid-table th, .rfid-table td {
+        padding: 16px;
+        text-align: left;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .rfid-table th {
+        background-color: var(--table-header-bg);
+        color: var(--table-header-text);
+        font-weight: 500;
+        text-transform: uppercase;
+        font-size: 14px;
+        letter-spacing: 0.5px;
+    }
+
+    .rfid-table td {
+        padding: 16px;
+        text-align: left;
+        border-bottom: 1px solid #e9ecef;
+        color: #495057; /* Add dark grey color for text */
+    }
+
+    .rfid-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .rfid-table tr:hover {
+        background-color: rgba(67, 97, 238, 0.05);
+    }
+
+    .rfid-table tr:nth-child(even) {
+        background-color: rgba(0, 0, 0, 0.02);
+    }
+
+    .rfid-missing {
+        background-color: rgba(231, 29, 54, 0.1);
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 50px;
+        font-size: 14px;
+        font-weight: 500;
+        text-align: center;
+        color: #495057; /* Add dark grey color for default status */
+    }
+
+    .status-present {
+        background-color: var(--badge-present-bg);
+        color: var(--success); /* Keep green for present status */
+        border: 1px solid var(--badge-present-border);
+    }
+
+    .status-missing {
+        background-color: var(--badge-missing-bg);
+        color: var(--danger); /* Keep red for missing status */
+        border: 1px solid var(--badge-missing-border);
+    }
+
+    .rfid-alert-box {
+        display: none;
+        background-color: var(--alert-bg);
+        color: var(--header-text);
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px var(--shadow);
+        margin-bottom: 20px;
+        animation: pulse 2s infinite;
+    }
+
+    .tag-uid {
+        font-family: "Courier New", monospace;
+        font-weight: 500;
+        background-color: rgba(67, 97, 238, 0.1);
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: #495057; /* Add dark grey color for UID */
+    }
+
+    .timestamp {
+        color: #6c757d; /* Add medium grey color for timestamp */
+    }
+
+    /* Add dark mode compatibility */
+    [data-theme="dark"] .rfid-table td {
+        color: #e0e0e0; /* Light grey for dark mode */
+    }
+
+    [data-theme="dark"] .tag-uid {
+        color: #e0e0e0; /* Light grey for dark mode */
+    }
+
+    [data-theme="dark"] .timestamp {
+        color: #adb5bd; /* Lighter grey for dark mode */
+    }
+
+    /* Prefer dark mode based on system settings */
+    @media (prefers-color-scheme: dark) {
+        body:not([data-theme="light"]) {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --card-bg: #2c2c2c;
+            --header-bg: #1f2a44;
+            --header-text: #e0e0e0;
+            --alert-bg: rgba(255, 99, 71, 0.8);
+            --chart-bg: #2c2c2c;
+            --control-bg: #3a3a3a;
+            --shadow: rgba(0, 0, 0, 0.3);
+            --badge-present-bg: rgba(46, 196, 182, 0.3);
+            --badge-present-border: #2ec4b6;
+            --badge-missing-bg: rgba(231, 29, 54, 0.3);
+            --badge-missing-border: #ff5555;
+            --table-header-bg: #1f2a44;
+            --table-header-text: #e0e0e0;
+        }
+    }
+</style>
+</head>
+<body>
+<div class="header">
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1><i class="fas fa-paw me-2"></i>Wildlife and RFID Tracking Dashboard</h1>
+            <div class="d-flex align-items-center">
+                <div id="systemStatus" class="me-3">
+                    <span class="status-indicator status-active" id="statusIndicator"></span>
+                    <span id="statusText">System Active</span>
+                </div>
+                <div class="timestamp me-3" id="currentTime"></div>
+                <i class="fas fa-moon theme-toggle" id="themeToggle" title="Toggle Dark/Light Mode"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="controls mb-3">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="detectionToggle" checked>
+                            <label class="form-check-label" for="detectionToggle">Visual Detection</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="soundDetectionToggle" checked>
+                            <label class="form-check-label" for="soundDetectionToggle">Sound Detection</label>
+                        </div>
+                    </div>
+                    <!-- <div class="col-md-4 text-end">
+                        <button class="btn btn-primary" id="snapshotBtn">
+                            <i class="fas fa-camera me-1"></i> Take Snapshot
+                        </button>
+                    </div> -->
+                </div>
+            </div>
+            
+            <div class="video-container mb-4">
+                <img src="http://192.168.105.161:8080/video" id="liveVideoFeed" class="video-feed" alt="Video Feed">
+                <!-- <div class="alert-badge d-none" id="alertBadge">
+                    <i class="fas fa-exclamation-triangle me-1"></i> <span id="detectionTypeAlert">Detection</span>
+                </div> -->
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-tags me-2"></i>RFID Tag Status</h5>
+                </div>
+                <div class="card-body">
+                    <div id="rfidAlertBox" class="rfid-alert-box"></div>
+                    <table class="rfid-table">
+                        <thead>
+                            <tr>
+                                <th>UID</th>
+                                <th>Last Seen</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rfidTagTable">
+                            <tr><td colspan="3" style="text-align: center; padding: 30px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-bell me-2"></i>Latest Visual Detection</h5>
+                        </div>
+                        <div class="card-body" id="latestDetection">
+                            <p class="text-center text-muted">No detections yet</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-volume-up me-2"></i>Latest Sound Detection</h5>
+                        </div>
+                        <div class="card-body" id="latestSoundDetection">
+                            <div class="audio-visualizer mb-3" id="audioVisualizer">
+                                <!-- Audio bars will be added dynamically -->
+                            </div>
+                            <p class="text-center text-muted" id="soundDetectionStatus">Listening...</p>
+                            <div id="soundDetectionInfo" class="d-none">
+                                <p class="mb-1"><strong>Detected: <span id="detectedSound">-</span></strong></p>
+                                <p class="mb-1">Confidence: <span id="soundConfidence">-</span></p>
+                                <p class="detection-timestamp" id="soundTimestamp">-</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Section -->
+            <div class="card mb-4">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Detection Analytics</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs" id="analyticsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="daily-tab" data-bs-toggle="tab" data-bs-target="#daily" type="button" role="tab">Daily</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="weekly-tab" data-bs-toggle="tab" data-bs-target="#weekly" type="button" role="tab">Weekly</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="monthly-tab" data-bs-toggle="tab" data-bs-target="#monthly" type="button" role="tab">Monthly</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="type-tab" data-bs-toggle="tab" data-bs-target="#byType" type="button" role="tab">By Type</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="sound-tab" data-bs-toggle="tab" data-bs-target="#soundStats" type="button" role="tab">Sound Stats</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="animal-tab" data-bs-toggle="tab" data-bs-target="#animalStats" type="button" role="tab">Animal Activity</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="analyticsTabsContent">
+                        <div class="tab-pane fade show active" id="daily" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="dailyChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="weekly" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="weeklyChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="monthly" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="monthlyChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="byType" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="typeChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="soundStats" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="soundTypeChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="animalStats" role="tabpanel">
+                            <div class="chart-container">
+                                <canvas id="animalDailyChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Sound Detection History -->
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-volume-up me-2"></i>Sound Detection History</h5>
+                    <span class="badge bg-light text-dark" id="soundDetectionCount">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-primary btn-filter active" data-filter="all" data-target="sound">All</button>
+                            <button type="button" class="btn btn-outline-danger btn-filter" data-filter="human" data-target="sound">Human</button>
+                            <button type="button" class="btn btn-outline-warning btn-filter" data-filter="chainsaw" data-target="sound">Chainsaw</button>
+                            <button type="button" class="btn btn-outline-purple btn-filter" data-filter="gun" data-target="sound">Gun</button>
+                        </div>
+                    </div>
+                    <div class="alert-history" id="soundDetectionHistory">
+                        <p class="text-center text-muted">No sound detections</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visual Detection History -->
+            <div class="card mb-4">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-history me-2"></i>Visual Detection History</h5>
+                    <span class="badge bg-danger" id="detectionCount">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-primary btn-filter active" data-filter="all" data-target="visual">All</button>
+                            <button type="button" class="btn btn-outline-danger btn-filter" data-filter="human" data-target="visual">Humans</button>
+                            <button type="button" class="btn btn-outline-info btn-filter" data-filter="animal" data-target="visual">Animals</button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="input-group date-filter">
+                            <span class="input-group-text">Date</span>
+                            <input type="date" class="form-control" id="dateFilter">
+                            <button class="btn btn-outline-secondary" id="clearDateFilter">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="alert-history" id="detectionHistory">
+                        <p class="text-center text-muted">No detection history</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ThingSpeak Status -->
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-cloud me-2"></i>ThingSpeak Status</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>Channel:</strong> <span id="channelName">Wildlife Detection</span></p>
+                    <p><strong>Last Update:</strong> <span id="lastUpdate">-</span></p>
+                    <p><strong>Total Records:</strong> <span id="totalRecords">0</span></p>
+                    <p><strong>Connection Status:</strong> <span id="connectionStatus">Connected</span></p>
+                    <button class="btn btn-sm btn-primary" id="refreshThingSpeak">
+                        <i class="fas fa-sync-alt me-1"></i> Refresh Data
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Audio Alert Sound -->
+<audio id="notificationSound">
+    <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3?filename=alert-sound-3-21879.mp3" type="audio/mpeg">
+</audio>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.1/chart.min.js"></script>
+<script>
+    // Constants
+    const FLASK_API_URL = 'http://localhost:5001';
+    const FLASK_API_URL_VIDEO = 'http://192.168.105.203:8080'; // Update this to match your Flask server's address and port
+    const THINGSPEAK_CHANNEL_ID = '2907484';
+    const THINGSPEAK_READ_API_KEY = '0X4HUTY1VXVRLQRV';
+    const SOUND_DETECTION_POLL_INTERVAL = 3000; // Poll every 3 seconds
+    const THINGSPEAK_POLL_INTERVAL = 15000; // Poll every 15 seconds
+    const VIDEO_STREAM_URL = "http://192.168.105.161:8080/video"; // ESP32-CAM MJPEG stream
+    const PYTHON_SERVER_URL = "http://192.168.105.203:8000";
+    const NEARBY_TIME = 1 * 60 * 1000; // 1 minute for RFID status
+
+    let soundDetectionActive = true;
+    let lastSoundCheckTime = new Date();
+    let soundDetectionHistory = [];
+    let detectionActive = true;
+    let detectionCount = 0;
+    let allDetections = [];
+    let currentFilter = 'all';
+    let currentDateFilter = null;
+    let knownTags = JSON.parse(localStorage.getItem('rfidTags')) || {};
+    const sound = document.getElementById('notificationSound');
+
+    // Theme Management
+    function setTheme(theme) {
+        document.body.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        const icon = document.getElementById('themeToggle');
+        icon.className = `fas fa-${theme === 'dark' ? 'sun' : 'moon'} theme-toggle`;
+        updateChartThemes(theme);
+        updateSystemStatus();
+    }
+
+    function toggleTheme() {
+        const currentTheme = document.body.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        setTheme(newTheme);
+    }
+
+    // Initialize theme
+    (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+        setTheme(initialTheme);
+    })();
+
+    // Theme toggle event listener
+    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
+    // Display current time
+    function updateCurrentTime() {
+        document.getElementById('currentTime').textContent = new Date().toLocaleString();
+    }
+
+    updateCurrentTime();
+    setInterval(updateCurrentTime, 1000);
+
+    // DOM Ready
+    $(document).ready(function() {
+        // Initialize audio visualizer
+        initAudioVisualizer();
+        
+        // Set up event listeners
+        setupEventListeners();
+        
+        // Initialize charts
+        initCharts();
+        
+        // Start polling for sound detection updates
+        pollSoundDetectionStatus();
+        
+        // Fetch initial ThingSpeak data
+        fetchThingSpeakData();
+
+        // Poll ThingSpeak every 15 seconds
+        setInterval(fetchThingSpeakData, THINGSPEAK_POLL_INTERVAL);
+        
+        // Start polling ThingSpeak for updates
+        pollThingSpeak();
+
+        // Update UI state based on system status
+        updateSystemStatus();
+        $('.btn-filter[data-target="sound"]').click(function() {
+        $('.btn-filter[data-target="sound"]').removeClass('active');
+        $(this).addClass('active');
+        const filter = $(this).data('filter');
+        filterSoundDetections(filter);
+        const savedHistory = localStorage.getItem('soundDetectionHistory');
+        if (savedHistory) {
+            soundDetectionHistory = JSON.parse(savedHistory);
+            updateSoundDetectionHistory([]);
+        }
+    });
+        // Add download button
+        addDownloadButton();
+    });
+
+    async function fetchThingSpeakData() {
+        const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL_ID}/feeds.json?api_key=${THINGSPEAK_READ_API_KEY}&results=1000&v=` + Date.now();
+        $('#refreshThingSpeak').html('<i class="fas fa-spinner fa-spin me-1"></i> Loading...').prop('disabled', true);
+
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP error: ${response.status}`);
+            }
+            const data = await response.json();
+
+            if (data.feeds && Array.isArray(data.feeds)) {
+                console.log("I don't care", data.feeds.field7)
+                processThingSpeakDetectionData(data);
+                processThingSpeakRFIDData(data);
+                updateThingSpeakStatus(data);
+            } else {
+                throw new Error('Invalid data format');
+            }
+        } catch (err) {
+            console.error('Error fetching ThingSpeak data:', err);
+            alert('Failed to fetch data from ThingSpeak.');
+        } finally {
+            $('#refreshThingSpeak').html('<i class="fas fa-sync-alt me-1"></i> Refresh Data').prop('disabled', false);
+        }
+    }
+
+    function processThingSpeakDetectionData(data) {
+        allDetections = [];
+        data.feeds.forEach(feed => {
+            if (!feed.field1) return;
+            const typeNum = parseInt(feed.field1);
+            const type = typeNum === 2 ? 'human' : 'animal';
+            
+            // Construct image URL using the Flask server
+            let imageUrl = null;
+            if (feed.field5) {
+                // Extract filename from the full URL path
+                const filename = feed.field5.split('/').pop();
+                imageUrl = `${FLASK_API_URL_VIDEO}/detections/${filename}`;
+            }
+            
+            const detection = {
+                id: feed.entry_id,
+                type: type,
+                distance: feed.field2 ? parseFloat(feed.field2) : null,
+                timestamp: feed.created_at,
+                datetime: new Date(feed.created_at).toLocaleString(),
+                image: imageUrl
+            };
+            allDetections.push(detection);
+        });
+        allDetections.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        detectionCount = allDetections.length;
+        $('#detectionCount').text(detectionCount);
+        updateDetectionHistory();
+        updateLatestDetection();
+        updateCharts();
+        checkNewDetections();
+    }
+
+    function processThingSpeakRFIDData(data) {
+        // Add debug logging
+        console.log('Raw ThingSpeak data:', data);
+        
+        const newTags = {};
+        data.feeds.forEach(feed => {
+            if (feed.field7) {
+                const uid = feed.field7.toUpperCase().trim();
+                const timestamp = new Date(feed.created_at).getTime();
+                
+                if (uid && !isNaN(timestamp)) {
+                    newTags[uid] = Math.max(newTags[uid] || 0, timestamp);
+                }
+            }
+        });
+
+        console.log('Processed RFID tags:', newTags);
+        
+        // Update knownTags object
+        for (let uid in newTags) {
+            knownTags[uid] = Math.max(knownTags[uid] || 0, newTags[uid]);
+        }
+
+        // Force immediate UI update
+        requestAnimationFrame(() => {
+            updateRFIDDashboard();
+            console.log('Dashboard updated with tags:', knownTags);
+        });
+    }
+
+    function updateThingSpeakStatus(data) {
+        const channel = data.channel;
+        $('#channelName').text(channel.name || 'Wildlife Detection');
+        $('#totalRecords').text(allDetections.length + Object.keys(knownTags).length);
+        if (allDetections.length > 0 || Object.keys(knownTags).length > 0) {
+            const latestTimestamp = allDetections[0]?.timestamp || Object.values(knownTags)[0];
+            if (latestTimestamp) {
+                $('#lastUpdate').text(new Date(latestTimestamp).toLocaleString());
+            }
+        }
+    }
+
+    function initAudioVisualizer() {
+        const visualizer = document.getElementById('audioVisualizer');
+        const barCount = 32;
+        
+        visualizer.innerHTML = '';
+        
+        for (let i = 0; i < barCount; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'audio-bar';
+            bar.style.height = '0px';
+            bar.style.left = `${(i / barCount) * 100}%`;
+            bar.style.width = `${90 / barCount}%`;
+            visualizer.appendChild(bar);
+        }
+        
+        animateAudioBars();
+    }
+
+    let lastKnownDetectionId = -1;
+    function checkNewDetections() {
+        if (allDetections.length > 0) {
+            const latest = allDetections[0];
+            if (lastKnownDetectionId !== -1 && latest.id > lastKnownDetectionId) {
+                $('#detectionTypeAlert').text(`${latest.type === 'human' ? 'Human' : 'Animal'} Detected!`);
+                $('#alertBadge').removeClass('d-none');
+                sound.play().catch(err => console.log('Audio error:', err));
+                setTimeout(() => $('#alertBadge').addClass('d-none'), 5000);
+            }
+            lastKnownDetectionId = latest.id;
+        }
+    }
+
+    function updateDetectionHistory() {
+        const $history = $('#detectionHistory');
+        $history.empty();
+        let filtered = allDetections.filter(d => currentFilter === 'all' || d.type === currentFilter);
+        if (currentDateFilter) {
+            const filterDate = new Date(currentDateFilter);
+            filtered = filtered.filter(d => {
+                const dDate = new Date(d.timestamp);
+                return dDate.toDateString() === filterDate.toDateString();
+            });
+        }
+        if (filtered.length === 0) {
+            $history.html('<p class="text-center text-muted">No detections match your filters</p>');
+            return;
+        }
+        filtered.forEach(d => {
+            const icon = d.type === 'human' ? 'fa-person' : 'fa-paw';
+            const imageHtml = d.image ? `<img src="${d.image}" class="img-fluid rounded">` : 
+                `<div class="bg-light text-center rounded p-3"><i class="fas ${icon} fa-2x text-secondary"></i></div>`;
+            $history.append(`
+                <div class="detection-card card mb-3 detection-type-${d.type}">
+                    <div class="card-body p-2">
+                        <div class="row align-items-center">
+                            <div class="col-4">${imageHtml}</div>
+                            <div class="col-8">
+                                <p class="mb-1 fw-bold">${d.type.charAt(0).toUpperCase() + d.type.slice(1)} Detected</p>
+                                <p class="detection-timestamp mb-0">${d.datetime}</p>
+                                ${d.distance ? `<small class="text-muted">Distance: ${d.distance} cm</small>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `);
+        });
+    }
+
+    function updateLatestDetection() {
+        if (allDetections.length === 0) {
+            $('#latestDetection').html('<p class="text-center text-muted">No detections yet</p>');
+            return;
+        }
+        
+        const latest = allDetections[0];
+        
+        const dt = new Date(latest.timestamp);
+        const year = dt.getFullYear();
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        const hours = String(dt.getHours()).padStart(2, '0');
+        const minutes = String(dt.getMinutes()).padStart(2, '0');
+        const seconds = String(dt.getSeconds()).padStart(2, '0');
+        
+        const filePrefix = latest.type === 'human' ? 'human' : 'not_human';
+        const imageHtml = latest.image ? `<img src="${latest.image}" class="img-fluid mb-2" style="max-height: 300px;">` : 
+            `<div class="bg-light text-center rounded p-5 mb-2"><i class="fas ${latest.type === 'human' ? 'fa-person' : 'fa-paw'} fa-4x text-secondary"></i></div>`;
+        $('#latestDetection').html(`
+            <div class="text-center">
+                ${imageHtml}
+                <p class="mb-1"><strong>${latest.type.charAt(0).toUpperCase() + latest.type.slice(1)} detected at:</strong></p>
+                <p class="detection-timestamp">${latest.datetime}</p>
+                ${latest.distance ? `<p class="text-muted">Distance: ${latest.distance} cm</p>` : ''}
+            </div>
+        `);
+    }
+
+    function updateRFIDDashboard() {
+        const now = new Date().getTime();
+        let alertMessage = '';
+        let tableBody = '';
+        const alertBox = document.getElementById('rfidAlertBox');
+
+        const sortedTags = Object.entries(knownTags).sort((a, b) => b[1] - a[1]);
+
+        console.log('Updating RFID Dashboard with tags:', knownTags);
+        console.log('Current time:', now);
+
+        if (sortedTags.length === 0) {
+            tableBody = '<tr><td colspan="3" style="text-align: center; padding: 30px;">No tags detected yet</td></tr>';
+            alertBox.style.display = 'none';
+        } else {
+            for (let [uid, lastSeen] of sortedTags) {
+                const timeDiff = now - lastSeen;
+                const status = timeDiff > NEARBY_TIME ? 'Missing' : 'Present';
+                const lastSeenStr = new Date(lastSeen).toLocaleString();
+                const rowClass = timeDiff > NEARBY_TIME ? 'rfid-missing' : '';
+                const statusClass = timeDiff > NEARBY_TIME ? 'status-missing' : 'status-present';
+
+                tableBody += `
+                    <tr class="${rowClass}">
+                        <td><span class="tag-uid">${uid}</span></td>
+                        <td><span class="timestamp">${lastSeenStr}</span></td>
+                        <td><span class="status-badge ${statusClass}">${status}</span></td>
+                    </tr>
+                `;
+
+                if (timeDiff > NEARBY_TIME) {
+                    alertMessage += `Tag <strong>${uid}</strong> not seen since ${lastSeenStr}<br>`;
+                }
+            }
+
+            alertBox.style.display = alertMessage ? 'block' : 'none';
+            alertBox.innerHTML = alertMessage;
+        }
+
+        document.getElementById('rfidTagTable').innerHTML = tableBody;
+    }
+
+    function animateAudioBars() {
+        const bars = document.querySelectorAll('.audio-bar');
+        
+        if (!soundDetectionActive) {
+            bars.forEach(bar => {
+                bar.style.height = '0px';
+                bar.style.backgroundColor = '#28a745';
+            });
+            return;
+        }
+        
+        bars.forEach(bar => {
+            const height = Math.random() * 40 + 5;
+            bar.style.height = `${height}px`;
+            bar.style.backgroundColor = '#28a745';
+        });
+        
+        setTimeout(animateAudioBars, 100);
+    }
+
+    function setupEventListeners() {
+        $('#soundDetectionToggle').change(function() {
+            soundDetectionActive = $(this).is(':checked');
+            updateSystemStatus();
+            fetch(`${FLASK_API_URL}/sound_control`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ active: soundDetectionActive }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Sound detection status updated:', data);
+            })
+            .catch(error => {
+                console.error('Error updating sound detection status:', error);
+                soundDetectionActive = !soundDetectionActive;
+                $('#soundDetectionToggle').prop('checked', soundDetectionActive);
+                updateSystemStatus();
+            });
+        });
+
+        $('#detectionToggle').change(function() {
+            detectionActive = this.checked;
+            updateSystemStatus();
+        });
+        
+        $('.btn-filter[data-target="visual"]').click(function() {
+            $('.btn-filter[data-target="visual"]').removeClass('active');
+            $(this).addClass('active');
+            currentFilter = $(this).data('filter');
+            updateDetectionHistory();
+        });
+
+        $('.btn-filter[data-target="sound"]').click(function() {
+            $('.btn-filter[data-target="sound"]').removeClass('active');
+            $(this).addClass('active');
+            const filter = $(this).data('filter');
+            filterSoundDetections(filter);
+        });
+
+        $('#dateFilter').change(function() {
+            currentDateFilter = this.value ? new Date(this.value) : null;
+            updateDetectionHistory();
+        });
+
+        $('#clearDateFilter').click(() => {
+            $('#dateFilter').val('');
+            currentDateFilter = null;
+            updateDetectionHistory();
+        });
+        
+        $('#snapshotBtn').click(() => {
+            $.post(`${PYTHON_SERVER_URL}/detect`)
+                .done(data => fetchThingSpeakData())
+                .fail(err => console.error('Snapshot error:', err));
+        });
+
+        $('#refreshThingSpeak').click(function() {
+            pollThingSpeak();
+        });
+    }
+
+    function updateChartThemes(theme) {
+        const charts = [
+            Chart.getChart('dailyChart'),
+            Chart.getChart('weeklyChart'),
+            Chart.getChart('monthlyChart'),
+            Chart.getChart('typeChart'),
+            Chart.getChart('soundTypeChart'),
+            Chart.getChart('animalDailyChart')
+        ];
+        charts.forEach(chart => {
+            if (chart) {
+                chart.options.plugins.title.color = theme === 'dark' ? '#e0e0e0' : '#212529';
+                chart.options.scales.y.title.color = theme === 'dark' ? '#e0e0e0' : '#212529';
+                chart.options.scales.x.title.color = theme === 'dark' ? '#e0e0e0' : '#212529';
+                chart.update();
+            }
+        });
+    }
+
+    function initCharts() {
+        const theme = document.body.getAttribute('data-theme') || 'light';
+        const textColor = theme === 'dark' ? '#e0e0e0' : '#212529';
+
+        const ctx1 = document.getElementById('dailyChart').getContext('2d');
+        const dailyChart = new Chart(ctx1, {
+            type: 'line',
+            data: {
+                labels: Array.from({ length: 24 }, (_, i) => {
+                    return i === 0 ? '12 AM' : 
+                        i < 12 ? `${i} AM` : 
+                        i === 12 ? '12 PM' : 
+                        `${i - 12} PM`;
+                }),
+                datasets: [{
+                    label: 'Sound Detections',
+                    data: Array(24).fill(0),
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                    tension: 0.4
+                }, {
+                    label: 'Visual Detections',
+                    data: Array(24).fill(0),
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.2)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Daily Detection Activity',
+                        color: textColor
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (tooltipItems) => {
+                                return `Time: ${tooltipItems[0].label}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Detections',
+                            color: textColor
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: textColor
+                        }
+                    }
+                }
+            }
+        });
+
+        const ctx2 = document.getElementById('weeklyChart').getContext('2d');
+        const weeklyChart = new Chart(ctx2, {
+            type: 'bar',
+            data: {
+                labels: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+                datasets: [{
+                    label: 'Sound Detections',
+                    data: Array(7).fill(0),
+                    backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                    borderColor: '#28a745',
+                    borderWidth: 1
+                }, {
+                    label: 'Visual Detections',
+                    data: Array(7).fill(0),
+                    backgroundColor: 'rgba(0, 123, 255, 0.6)',
+                    borderColor: '#007bff',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Weekly Detection Activity',
+                        color: textColor
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Detections',
+                            color: textColor
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Day',
+                            color: textColor
+                        }
+                    }
+                }
+            }
+        });
+
+        const today = new Date();
+        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+        const dayLabels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
+
+        const ctx3 = document.getElementById('monthlyChart').getContext('2d');
+        const monthlyChart = new Chart(ctx3, {
+            type: 'line',
+            data: {
+                labels: dayLabels,
+                datasets: [{
+                    label: 'Sound Detections',
+                    data: Array(daysInMonth).fill(0),
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                    tension: 0.4,
+                    pointRadius: 3
+                }, {
+                    label: 'Visual Detections',
+                    data: Array(daysInMonth).fill(0),
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.2)',
+                    tension: 0.4,
+                    pointRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Monthly Detection Activity (${today.toLocaleString('default', { month: 'long' })})`,
+                        color: textColor
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Detections',
+                            color: textColor
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Day',
+                            color: textColor
+                        }
+                    }
+                }
+            }
+        });
+
+        const ctx4 = document.getElementById('typeChart').getContext('2d');
+        const typeChart = new Chart(ctx4, {
+            type: 'doughnut',
+            data: {
+                labels: ['Humans', 'Animals'],
+                datasets: [{
+                    data: [0, 0],
+                    backgroundColor: ['#dc3545', '#17a2b8'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Detection Type Distribution',
+                        color: textColor
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: textColor
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const ctx5 = document.getElementById('soundTypeChart').getContext('2d');
+        const soundTypeChart = new Chart(ctx5, {
+            type: 'doughnut',
+            data: {
+                labels: ['Normal Sounds', 'Human Sounds', 'Chainsaw', 'Gun Sounds'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: ['#28a745', '#dc3545', '#fd7e14', '#6f42c1']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Sound Detection Types',
+                        color: textColor
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: textColor
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const ctx6 = document.getElementById('animalDailyChart').getContext('2d');
+        const animalDailyChart = new Chart(ctx6, {
+            type: 'line',
+            data: {
+                labels: dayLabels,
+                datasets: [{
+                    label: 'Animal Detections',
+                    data: Array(daysInMonth).fill(0),
+                    borderColor: '#17a2b8',
+                    backgroundColor: 'rgba(23, 162, 184, 0.2)',
+                    tension: 0.4,
+                    pointRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Animal Detection Activity (${today.toLocaleString('default', { month: 'long' })})`,
+                        color: textColor
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Detections',
+                            color: textColor
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Day',
+                            color: textColor
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function pollSoundDetectionStatus() {
+if (!soundDetectionActive) {
+    setTimeout(pollSoundDetectionStatus, SOUND_DETECTION_POLL_INTERVAL);
+    return;
+}
+
+fetch(`${FLASK_API_URL}/sound_status`)
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    })
+    .then(data => {
+        console.log('Sound detection data:', data);  // Debug output
+        soundDetectionActive = data.active;
+        $('#soundDetectionToggle').prop('checked', soundDetectionActive);
+        updateSystemStatus();
+        
+        if (data.recent_alerts && data.recent_alerts.length > 0) {
+            processNewSoundAlerts(data.recent_alerts);
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching sound detection status:', error);
+    })
+    .finally(() => {
+        setTimeout(pollSoundDetectionStatus, SOUND_DETECTION_POLL_INTERVAL);
+    });
+}
+
+
+function processNewSoundAlerts(recentAlerts) {
+if (!soundDetectionActive || !recentAlerts || recentAlerts.length === 0) return;
+
+recentAlerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+const newestAlert = recentAlerts[0];
+const newestAlertTime = new Date(newestAlert.timestamp);
+
+if (newestAlertTime > lastSoundCheckTime) {
+    lastSoundCheckTime = newestAlertTime;
+    updateLatestSoundDetection(newestAlert);
+    updateSoundDetectionHistory(recentAlerts);
+    
+    if (newestAlert.type === "HUMAN" || newestAlert.type === "CHAINSAW" || newestAlert.type === "GUN") {
+        playNotificationSound();
+    }
+}
+}
+
+    function updateLatestSoundDetection(alert) {
+        $('#soundDetectionInfo').removeClass('d-none');
+        $('#soundDetectionStatus').addClass('d-none');
+        
+        $('#detectedSound').text(alert.sound);
+        $('#soundConfidence').text(alert.confidence.toFixed(2));
+        $('#soundTimestamp').text(new Date(alert.timestamp).toLocaleTimeString());
+        
+        if (alert.type === "HUMAN" || alert.type === "CHAINSAW" || alert.type === "GUN") {
+            $('#latestSoundDetection').find('.card-body').addClass('sound-alert-card');
+            $('#latestSoundDetection').find('.card-header').removeClass('bg-success').addClass('bg-danger');
+            const bars = document.querySelectorAll('.audio-bar');
+            bars.forEach(bar => {
+                bar.style.backgroundColor = '#dc3545';
+                const height = Math.random() * 50 + 10;
+                bar.style.height = `${height}px`;
+            });
+        } else {
+            $('#latestSoundDetection').find('.card-body').removeClass('sound-alert-card');
+            $('#latestSoundDetection').find('.card-header').removeClass('bg-danger').addClass('bg-success');
+            const bars = document.querySelectorAll('.audio-bar');
+            bars.forEach(bar => {
+                bar.style.backgroundColor = '#28a745';
+            });
+        }
+    }
+
+    function updateSoundDetectionHistory(alerts) {
+        const $history = $('#soundDetectionHistory');
+        
+        if ($history.find('p.text-muted').length > 0) {
+            $history.empty();
+        }
+         // Merge new alerts with existing history, avoiding duplicates
+        alerts.forEach(alert => {
+            if (!soundDetectionHistory.some(existing => 
+                existing.timestamp === alert.timestamp && 
+                existing.type === alert.type)) {
+                soundDetectionHistory.push(alert);
+            }
+        });
+        // Sort alerts by timestamp in descending order (newest first)
+        const sortedAlerts = alerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // Sort entire history by timestamp (newest first)
+        soundDetectionHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        $('#soundDetectionCount').text(sortedAlerts.length);
+        
+        // Clear existing alerts
+        $history.empty();
+        if (soundDetectionHistory.length === 0) {
+        $history.html('<p class="text-center text-muted">No sound detections</p>');
+        return;
+    }
+    soundDetectionHistory.forEach(alert => {
+            let cardClass = 'sound-card';
+            let badgeClass = 'bg-success';
+            let iconClass = 'fa-volume-up';
+            
+            switch(alert.type) {
+                case "HUMAN":
+                    cardClass = 'sound-alert-card detection-type-human';
+                    badgeClass = 'bg-danger';
+                    iconClass = 'fa-user';
+                    break;
+                case "CHAINSAW":
+                    cardClass = 'sound-alert-card detection-type-chainsaw';
+                    badgeClass = 'bg-warning text-dark';
+                    iconClass = 'fa-tools';
+                    break;
+                case "GUN":
+                    cardClass = 'sound-alert-card detection-type-gun';
+                    badgeClass = 'bg-purple';
+                    iconClass = 'fa-bullseye';
+                    break;
+            }
+            
+            const alertHtml = `
+                <div class="card mb-2 ${cardClass}" data-sound-type="${alert.type.toLowerCase()}">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="badge ${badgeClass} me-2">
+                                    <i class="fas ${iconClass} me-1"></i> ${alert.type}
+                                </span>
+                                <strong>${alert.sound}</strong>
+                            </div>
+                            <span class="text-muted detection-timestamp">
+                                ${new Date(alert.timestamp).toLocaleString()}
+                            </span>
+                        </div>
+                        <div class="mt-1">
+                            <small class="text-muted">Confidence: ${alert.confidence.toFixed(2)}</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            $history.append(alertHtml);
+        });
+
+// Apply current filter
+const currentFilter = $('.btn-filter[data-target="sound"].active').data('filter');
+filterSoundDetections(currentFilter);
+// Save history to localStorage for persistence
+localStorage.setItem('soundDetectionHistory', JSON.stringify(soundDetectionHistory));
+}
+
+    function filterSoundDetections(filter) {
+        if (filter === 'all') {
+            $('#soundDetectionHistory .card').show();
+        } else {
+            $('#soundDetectionHistory .card').hide();
+            $(`#soundDetectionHistory .card[data-sound-type="${filter}"]`).show();
+        }
+    }
+
+    function playNotificationSound() {
+        const audio = document.getElementById('notificationSound');
+        audio.play();
+    }
+
+    function pollThingSpeak() {
+        const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL_ID}/feeds.json?api_key=${THINGSPEAK_READ_API_KEY}&results=10`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                $('#channelName').text(data.channel.name);
+                $('#lastUpdate').text(new Date(data.feeds[data.feeds.length - 1].created_at).toLocaleString());
+                $('#totalRecords').text(data.channel.last_entry_id);
+                $('#connectionStatus').text('Connected').removeClass('text-danger').addClass('text-success');
+                updateChartsWithThingSpeakData(data);
+            })
+            .catch(error => {
+                console.error('Error fetching ThingSpeak data:', error);
+                $('#connectionStatus').text('Connection Error').removeClass('text-success').addClass('text-danger');
+            })
+            .finally(() => {
+                setTimeout(pollThingSpeak, THINGSPEAK_POLL_INTERVAL);
+            });
+    }
+
+    function updateChartsWithThingSpeakData(data) {
+        const feeds = data.feeds;
+        
+        const soundTypeData = {
+            normal: 0,
+            human: 0,
+            chainsaw: 0,
+            gun: 0
+        };
+        
+        feeds.forEach(feed => {
+            if (feed.field6) {
+                const soundType = parseInt(feed.field6);
+                if (soundType === 0) soundTypeData.normal++;
+                else if (soundType === 1) soundTypeData.human++;
+                else if (soundType === 2) soundTypeData.chainsaw++;
+                else if (soundType === 3) soundTypeData.gun++;
+            }
+        });
+        
+        const soundTypeChart = Chart.getChart('soundTypeChart');
+        if (soundTypeChart) {
+            soundTypeChart.data.datasets[0].data = [
+                soundTypeData.normal,
+                soundTypeData.human,
+                soundTypeData.chainsaw,
+                soundTypeData.gun
+            ];
+            soundTypeChart.update();
+        }
+
+        const hourlyData = {
+            sound: Array(24).fill(0),
+            visual: Array(24).fill(0)
+        };
+
+        feeds.forEach(feed => {
+            const date = new Date(feed.created_at);
+            const hour = date.getHours();
+            
+            if (feed.field6) {
+                const soundType = parseInt(feed.field6);
+                if (soundType >= 0 && soundType <= 3) {
+                    hourlyData.sound[hour]++;
+                }
+            }
+            
+            if (feed.field1 && parseInt(feed.field1) === 2) {
+                hourlyData.visual[hour]++;
+            }
+        });
+
+        const dailyChart = Chart.getChart('dailyChart');
+        if (dailyChart) {
+            const hourLabels = Array.from({ length: 24 }, (_, i) => {
+                return i === 0 ? '12 AM' : 
+                    i < 12 ? `${i} AM` : 
+                    i === 12 ? '12 PM' : 
+                    `${i - 12} PM`;
+            });
+            
+            dailyChart.data.labels = hourLabels;
+            dailyChart.data.datasets[0].data = hourlyData.sound;
+            dailyChart.data.datasets[1].data = hourlyData.visual;
+            dailyChart.update();
+        }
+
+        const weekdayData = {
+            sound: Array(7).fill(0),
+            visual: Array(7).fill(0)
+        };
+
+        feeds.forEach(feed => {
+            const date = new Date(feed.created_at);
+            const dayOfWeek = date.getDay();
+            
+            if (feed.field6) {
+                const soundType = parseInt(feed.field6);
+                if (soundType >= 0 && soundType <= 3) {
+                    weekdayData.sound[dayOfWeek]++;
+                }
+            }
+            
+            if (feed.field1 && parseInt(feed.field1) === 2) {
+                weekdayData.visual[dayOfWeek]++;
+            }
+        });
+
+        const weeklyChart = Chart.getChart('weeklyChart');
+        if (weeklyChart) {
+            const weekdayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            
+            weeklyChart.data.labels = weekdayLabels;
+            weeklyChart.data.datasets[0].data = weekdayData.sound;
+            weeklyChart.data.datasets[1].data = weekdayData.visual;
+            weeklyChart.update();
+        }
+
+        const today = new Date();
+        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+        const monthlyData = {
+            sound: Array(daysInMonth).fill(0),
+            visual: Array(daysInMonth).fill(0)
+        };
+
+        feeds.forEach(feed => {
+            const date = new Date(feed.created_at);
+            if (date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear()) {
+                const day = date.getDate() - 1;
+                
+                if (feed.field6) {
+                    const soundType = parseInt(feed.field6);
+                    if (soundType >= 0 && soundType <= 3) {
+                        monthlyData.sound[day]++;
+                    }
+                }
+                
+                if (feed.field1 && parseInt(feed.field1) === 2) {
+                    monthlyData.visual[day]++;
+                }
+            }
+        });
+
+        const monthlyChart = Chart.getChart('monthlyChart');
+        if (monthlyChart) {
+            const dayLabels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
+            
+            monthlyChart.data.labels = dayLabels;
+            monthlyChart.data.datasets[0].data = monthlyData.sound;
+            monthlyChart.data.datasets[1].data = monthlyData.visual;
+            monthlyChart.update();
+        }
+
+        const detectionTypeData = {
+            human: 0,
+            animal: 0
+        };
+
+        feeds.forEach(feed => {
+            if (feed.field1) {
+                const typeNum = parseInt(feed.field1);
+                if (typeNum === 2) detectionTypeData.human++;
+                else detectionTypeData.animal++;
+            }
+        });
+
+        const typeChart = Chart.getChart('typeChart');
+        if (typeChart) {
+            typeChart.data.datasets[0].data = [detectionTypeData.human, detectionTypeData.animal];
+            typeChart.update();
+        }
+
+        const animalData = Array(daysInMonth).fill(0);
+        
+        feeds.forEach(feed => {
+            const date = new Date(feed.created_at);
+            if (date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear()) {
+                const day = date.getDate() - 1; // Convert to 0-based index
+                if (feed.field1 && parseInt(feed.field1) === 1) { // Check for animal detection (field1 = 1)
+                    animalData[day]++;
+                }
+            }
+        });
+
+        const animalChart = Chart.getChart('animalDailyChart');
+        if (animalChart) {
+            const dayLabels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
+            animalChart.data.labels = dayLabels;
+            animalChart.data.datasets[0].data = animalData;
+            animalChart.update();
+        }
+    }
+
+    function updateCharts() {
+        const today = new Date();
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const startDate = startOfMonth.toISOString();
+        
+        const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL_ID}/feeds.json?api_key=${THINGSPEAK_READ_API_KEY}&start=${startDate}`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                localStorage.setItem('lastThingSpeakData', JSON.stringify(data));
+                updateChartsWithThingSpeakData(data);
+            })
+            .catch(error => {
+                console.error('Error updating charts:', error);
+                const cachedData = localStorage.getItem('lastThingSpeakData');
+                if (cachedData) {
+                    updateChartsWithThingSpeakData(JSON.parse(cachedData));
+                }
+            });
+    }
+
+    window.addEventListener('load', function() {
+        initCharts();
+        const cachedData = localStorage.getItem('lastThingSpeakData');
+        if (cachedData) {
+            try {
+                updateChartsWithThingSpeakData(JSON.parse(cachedData));
+            } catch (e) {
+                console.error('Error processing cached data:', e);
+                localStorage.removeItem('lastThingSpeakData');
+            }
+        }
+        updateCharts();
+        setInterval(updateCharts, THINGSPEAK_POLL_INTERVAL);
+        pollThingSpeak();
+    });
+
+    function updateSystemStatus() {
+        const theme = document.body.getAttribute('data-theme') || 'light';
+        const textColor = theme === 'dark' ? '#e0e0e0' : '#212529';
+        
+        if (soundDetectionActive && detectionActive) {
+            $('#statusIndicator').addClass('status-active').removeClass('status-inactive');
+            $('#statusText').text('System Active').css('color', textColor);
+            $('#soundDetectionStatus').text('Listening...');
+            animateAudioBars();
+        } else {
+            $('#statusIndicator').addClass('status-inactive').removeClass('status-active');
+            $('#statusText').text('System Inactive').css('color', textColor);
+            $('#soundDetectionStatus').text('Sound Detection Paused');
+            const bars = document.querySelectorAll('.audio-bar');
+            bars.forEach(bar => {
+                bar.style.height = '0px';
+            });
+        }
+    }
+
+    function downloadDetectionData() {
+        const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL_ID}/feeds.json?api_key=${THINGSPEAK_READ_API_KEY}&results=5000`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const csvData = processDataForCSV(data);
+                const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                const today = new Date();
+                const dateString = today.toISOString().split('T')[0];
+                link.setAttribute('href', url);
+                link.setAttribute('download', `wildlife_rfid_summary_${dateString}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            })
+            .catch(error => {
+                console.error('Error downloading data:', error);
+                alert('There was an error downloading the data. Please try again.');
+            });
+    }
+
+    function processDataForCSV(data) {
+        let csvContent = "Visual Detection Summary,,,Audio Detection Summary,,,RFID Tag Summary\n";
+        csvContent += "Date & Time,Human Detection,Distance (cm),Sound Type,Probability,RFID Tag UID,Status\n";
+        
+        const groupedData = {};
+        
+        data.feeds.forEach(feed => {
+            const timestamp = new Date(feed.created_at);
+            const timeKey = new Date(
+                timestamp.getFullYear(),
+                timestamp.getMonth(),
+                timestamp.getDate(),
+                timestamp.getHours(),
+                timestamp.getMinutes()
+            ).toISOString();
+            
+            if (!groupedData[timeKey]) {
+                groupedData[timeKey] = {
+                    formattedTime: timestamp.toLocaleString(),
+                    visualDetection: null,
+                    audioDetection: null,
+                    rfidTag: null
+                };
+            }
+            
+            if (feed.field1 && parseInt(feed.field1) === 2) {
+                groupedData[timeKey].visualDetection = {
+                    isHuman: true,
+                    distance: feed.field2 ? parseFloat(feed.field2).toFixed(2) : 'N/A'
+                };
+            }
+            
+            if (feed.field6) {
+                const soundType = parseInt(feed.field6);
+                let category = 'Normal';
+                if (soundType === 1) category = 'Human';
+                else if (soundType === 2) category = 'Chainsaw';
+                else if (soundType === 3) category = 'Gun';
+                
+                const probability = feed.field8 ? parseFloat(feed.field8).toFixed(2) : 'N/A';
+                
+                groupedData[timeKey].audioDetection = {
+                    soundType: category,
+                    probability: probability
+                };
+            }
+
+            if (feed.field7) {
+                const uid = feed.field7.toUpperCase().trim();
+                const status = (new Date().getTime() - new Date(feed.created_at).getTime()) > NEARBY_TIME ? 'Missing' : 'Present';
+                groupedData[timeKey].rfidTag = { uid, status };
+            }
+        });
+        
+        Object.values(groupedData).forEach(entry => {
+            const visualDetection = entry.visualDetection ? 'Yes' : 'No';
+            const visualDistance = entry.visualDetection ? entry.visualDetection.distance : '';
+            const soundType = entry.audioDetection ? entry.audioDetection.soundType : '';
+            const soundProbability = entry.audioDetection ? entry.audioDetection.probability : '';
+            const rfidTag = entry.rfidTag ? entry.rfidTag.uid : '';
+            const rfidStatus = entry.rfidTag ? entry.rfidTag.status : '';
+            csvContent += `"${entry.formattedTime}",${visualDetection},${visualDistance},${soundType},${soundProbability},${rfidTag},${rfidStatus}\n`;
+        });
+        
+        return csvContent;
+    }
+
+    function addDownloadButton() {
+        const downloadButtonHtml = `
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-file-download me-2"></i>Export Summary</h5>
+            </div>
+            <div class="card-body text-center">
+                <p>Download a summarized report of detections and RFID tag statuses as a CSV file.</p>
+                <button id="downloadCSVBtn" class="btn btn-primary">
+                    <i class="fas fa-file-csv me-2"></i>Download Summary
+                </button>
+            </div>
+        </div>`;
+        
+        $(downloadButtonHtml).insertAfter('#rfidTagTable').parent();
+        
+        $('#downloadCSVBtn').click(function() {
+            const $btn = $(this);
+            const originalText = $btn.html();
+            $btn.html('<i class="fas fa-spinner fa-spin me-2"></i>Generating CSV...');
+            $btn.prop('disabled', true);
+            
+            try {
+                downloadDetectionData();
+            } catch (error) {
+                console.error('Error in download process:', error);
+                alert('There was an error preparing the download. Please try again.');
+            }
+            
+            setTimeout(() => {
+                $btn.html(originalText);
+                $btn.prop('disabled', false);
+            }, 2000);
+        });
+    }
+</script>
+</body>
+</html>
