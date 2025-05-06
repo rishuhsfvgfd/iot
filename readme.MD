@@ -6,7 +6,7 @@ This project is an IoT-based system designed to monitor wildlife activity and tr
 
 The system performs the following tasks:
 - **Sound Detection**: Identifies specific sounds (e.g., human voices, chainsaws, gunshots) using machine learning.
-- **Visual Detection**: Tracks objects and calculates distances using ultrasonic sensors and a camera module.
+- **Visual Detection**: Tracks moving living objects using PIR and calculates distances using ultrasonic sensors and a camera module.
 - **RFID Tracking**: Monitors RFID tags to detect their presence or absence.
 - **Data Visualization**: Displays detection history and trends on a web-based dashboard.
 - **Low Power Mode**: Implements sleep mode on the ESP32 to conserve power.
